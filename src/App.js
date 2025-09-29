@@ -50,10 +50,32 @@ function App() {
     }
   };
 
-  // 고유 카테고리 목록 가져오기 (bookmarks와 categories 테이블에서 모두)
+  // State for categories from DB
+  const [categories, setCategories] = useState([]);
+
+  // categories 테이블에서 카테고리 목록 가져오기
+  const fetchCategories = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .select('*')
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.error('카테고리 목록을 불러오는데 실패했습니다:', error);
+        return;
+      }
+
+      console.log('카테고리 목록:', data);
+      setCategories(data || []);
+    } catch (error) {
+      console.error('카테고리 목록을 불러오는데 실패했습니다:', error);
+    }
+  };
+
+  // 고유 카테고리 목록 가져오기 (categories 테이블에서)
   const getUniqueCategories = () => {
-    const bookmarkCategories = bookmarks.map(bookmark => bookmark.category);
-    return [...new Set(bookmarkCategories.filter(cat => cat && cat.trim() !== ''))];
+    return categories.map(cat => cat.name);
   };
 
 
@@ -72,26 +94,10 @@ function App() {
     if (savedLoginState === 'true') {
       setIsLoggedIn(true);
       fetchBookmarks();
-      // categories 테이블도 확인
-      checkCategoriesTable();
+      fetchCategories();
     }
   }, []);
 
-  // categories 테이블 확인
-  const checkCategoriesTable = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('categories')
-        .select('*');
-
-      console.log('categories 테이블 데이터:', data);
-      if (error) {
-        console.log('categories 테이블 에러:', error);
-      }
-    } catch (error) {
-      console.log('categories 테이블 접근 실패:', error);
-    }
-  };
 
   // 새 카테고리 추가
   const handleAddCategory = async () => {
@@ -109,30 +115,29 @@ function App() {
     }
 
     try {
-      console.log('Supabase에 카테고리용 임시 북마크 추가 중...');
-      // 카테고리를 표시하기 위한 임시 북마크 생성
+      console.log('categories 테이블에 카테고리 추가 중...');
+      // categories 테이블에 추가
       const { data, error } = await supabase
-        .from('bookmarks')
-        .insert([{
-          category: newCategoryName.trim(),
-          url: `category-placeholder-${Date.now()}`,
-          description: `[${newCategoryName.trim()} 카테고리]`,
-          order: bookmarks.length
-        }])
+        .from('categories')
+        .insert([{ name: newCategoryName.trim() }])
         .select();
 
       console.log('Supabase 응답 - data:', data);
       console.log('Supabase 응답 - error:', error);
 
       if (error) {
-        console.error('카테고리 추가 실패:', error);
-        alert('카테고리 추가에 실패했습니다: ' + error.message);
+        if (error.code === '23505') { // unique constraint 에러
+          alert('이미 존재하는 카테고리입니다.');
+        } else {
+          console.error('카테고리 추가 실패:', error);
+          alert('카테고리 추가에 실패했습니다: ' + error.message);
+        }
         return;
       }
 
       alert(`"${newCategoryName.trim()}" 카테고리가 추가되었습니다.`);
       setNewCategoryName('');
-      fetchBookmarks(); // 목록 새로고침
+      fetchCategories(); // 카테고리 목록 새로고침
     } catch (error) {
       console.error('카테고리 추가 실패:', error);
       alert('네트워크 오류가 발생했습니다: ' + error.message);
@@ -159,7 +164,23 @@ function App() {
     }
 
     try {
-      // bookmarks 테이블에서 해당 카테고리의 모든 항목 업데이트
+      // categories 테이블에서 수정
+      const { error: categoryError } = await supabase
+        .from('categories')
+        .update({ name: editCategoryName.trim() })
+        .eq('name', oldCategory);
+
+      if (categoryError) {
+        if (categoryError.code === '23505') {
+          alert('이미 존재하는 카테고리입니다.');
+        } else {
+          console.error('카테고리 수정 실패:', categoryError);
+          alert('카테고리 수정에 실패했습니다.');
+        }
+        return;
+      }
+
+      // bookmarks 테이블에서도 해당 카테고리의 모든 항목 업데이트
       const { error: bookmarkError } = await supabase
         .from('bookmarks')
         .update({ category: editCategoryName.trim() })
@@ -167,14 +188,13 @@ function App() {
 
       if (bookmarkError) {
         console.error('북마크 카테고리 업데이트 실패:', bookmarkError);
-        alert('카테고리 수정에 실패했습니다.');
-        return;
       }
 
       alert('카테고리가 수정되었습니다.');
       setEditingCategory('');
       setEditCategoryName('');
-      fetchBookmarks(); // 목록 새로고침
+      fetchCategories(); // 카테고리 목록 새로고침
+      fetchBookmarks(); // 북마크 목록도 새로고침
     } catch (error) {
       console.error('카테고리 수정 실패:', error);
       alert('네트워크 오류가 발생했습니다.');
@@ -186,36 +206,50 @@ function App() {
     const bookmarksInCategory = bookmarks.filter(b => b.category === category);
 
     if (bookmarksInCategory.length > 0) {
-      if (!window.confirm(`${category} 카테고리에 ${bookmarksInCategory.length}개의 북마크가 있습니다. 모든 북마크를 삭제하시겠습니까?`)) {
+      if (!window.confirm(`${category} 카테고리에 ${bookmarksInCategory.length}개의 북마크가 있습니다. 카테고리와 모든 북마크를 삭제하시겠습니까?`)) {
         return;
       }
 
-      try {
-        // 해당 카테고리의 모든 북마크 삭제
-        const { error } = await supabase
-          .from('bookmarks')
-          .delete()
-          .eq('category', category);
+      // 해당 카테고리의 모든 북마크 먼저 삭제
+      const { error: bookmarkError } = await supabase
+        .from('bookmarks')
+        .delete()
+        .eq('category', category);
 
-        if (error) {
-          console.error('북마크 삭제 실패:', error);
-          alert('북마크 삭제에 실패했습니다.');
-          return;
-        }
-
-        alert('카테고리가 삭제되었습니다.');
-        fetchBookmarks(); // 목록 새로고침
-      } catch (error) {
-        console.error('카테고리 삭제 실패:', error);
-        alert('네트워크 오류가 발생했습니다.');
+      if (bookmarkError) {
+        console.error('북마크 삭제 실패:', bookmarkError);
+        alert('북마크 삭제에 실패했습니다.');
+        return;
       }
+    }
+
+    try {
+      // categories 테이블에서 카테고리 삭제
+      const { error } = await supabase
+        .from('categories')
+        .delete()
+        .eq('name', category);
+
+      if (error) {
+        console.error('카테고리 삭제 실패:', error);
+        alert('카테고리 삭제에 실패했습니다.');
+        return;
+      }
+
+      alert('카테고리가 삭제되었습니다.');
+      fetchCategories(); // 카테고리 목록 새로고침
+      fetchBookmarks(); // 북마크 목록도 새로고침
+    } catch (error) {
+      console.error('카테고리 삭제 실패:', error);
+      alert('네트워크 오류가 발생했습니다.');
     }
   };
 
-  // 로그인 상태가 변경될 때 북마크 목록 불러오기
+  // 로그인 상태가 변경될 때 북마크 목록 및 카테고리 불러오기
   useEffect(() => {
     if (isLoggedIn) {
       fetchBookmarks();
+      fetchCategories();
     }
   }, [isLoggedIn]);
 

@@ -317,11 +317,24 @@ function App() {
     }
 
     try {
+      // 새 북마크는 항상 맨 위(order: 0)에 추가
+      // 먼저 기존 북마크들의 order를 1씩 증가
+      if (bookmarks.length > 0) {
+        const { error: updateError } = await supabase
+          .from('bookmarks')
+          .update({ order: supabase.sql`order + 1` });
+
+        if (updateError) {
+          console.error('기존 북마크 순서 업데이트 실패:', updateError);
+          // 에러가 있어도 계속 진행 (수동으로 order 재정렬)
+        }
+      }
+
       const bookmarkData = {
         url: formData.url,
         description: formData.description,
         category: formData.category,
-        order: bookmarks.length
+        order: 0  // 항상 맨 위
       };
 
       const { error } = await supabase

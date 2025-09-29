@@ -327,9 +327,15 @@ function App() {
         order: -(Date.now())  // 음수 타임스탬프로 항상 맨 위 보장
       };
 
-      const { error } = await supabase
+      // UI 먼저 업데이트 (즉시 반응)
+      setFormData({ category: '', url: '', description: '' });
+      setShowModal(false);
+
+      // 백그라운드에서 DB에 저장
+      const { data, error } = await supabase
         .from('bookmarks')
-        .insert([bookmarkData]);
+        .insert([bookmarkData])
+        .select();
 
       if (error) {
         console.error('북마크 추가 실패:', error);
@@ -338,10 +344,10 @@ function App() {
         return;
       }
 
-      // 성공 시 바로 폼 초기화하고 모달 닫기 (알림 팝업 없음)
-      setFormData({ category: '', url: '', description: '' });
-      setShowModal(false);
-      fetchBookmarks(); // 목록 새로고침
+      // 성공하면 로컬 state에 즉시 추가 (DB 재조회 없이)
+      if (data && data[0]) {
+        setBookmarks(prevBookmarks => [data[0], ...prevBookmarks]);
+      }
     } catch (error) {
       console.error('북마크 추가 실패:', error);
       alert('네트워크 오류가 발생했습니다.');

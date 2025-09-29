@@ -43,16 +43,17 @@ function App() {
       }
 
       console.log('현재 북마크 데이터 구조:', data?.[0]);
+      console.log('전체 북마크 데이터:', data);
       setBookmarks(data || []);
     } catch (error) {
       console.error('북마크를 불러오는데 실패했습니다:', error);
     }
   };
 
-  // 고유 카테고리 목록 가져오기
+  // 고유 카테고리 목록 가져오기 (bookmarks와 categories 테이블에서 모두)
   const getUniqueCategories = () => {
-    const categories = bookmarks.map(bookmark => bookmark.category);
-    return [...new Set(categories)];
+    const bookmarkCategories = bookmarks.map(bookmark => bookmark.category);
+    return [...new Set(bookmarkCategories.filter(cat => cat && cat.trim() !== ''))];
   };
 
 
@@ -94,24 +95,38 @@ function App() {
 
   // 새 카테고리 추가
   const handleAddCategory = async () => {
+    console.log('카테고리 추가 시작:', newCategoryName);
+
     if (!newCategoryName.trim()) {
       alert('카테고리 이름을 입력하세요.');
       return;
     }
 
+    // 중복 체크
+    if (getUniqueCategories().includes(newCategoryName.trim())) {
+      alert('이미 존재하는 카테고리입니다.');
+      return;
+    }
+
     try {
-      // categories 테이블에 추가
-      const { error } = await supabase
-        .from('categories')
-        .insert([{ name: newCategoryName.trim() }]);
+      console.log('Supabase에 카테고리용 임시 북마크 추가 중...');
+      // 카테고리를 표시하기 위한 임시 북마크 생성
+      const { data, error } = await supabase
+        .from('bookmarks')
+        .insert([{
+          category: newCategoryName.trim(),
+          url: `category-placeholder-${Date.now()}`,
+          description: `[${newCategoryName.trim()} 카테고리]`,
+          order: bookmarks.length
+        }])
+        .select();
+
+      console.log('Supabase 응답 - data:', data);
+      console.log('Supabase 응답 - error:', error);
 
       if (error) {
-        if (error.code === '23505') { // unique constraint 에러
-          alert('이미 존재하는 카테고리입니다.');
-        } else {
-          console.error('카테고리 추가 실패:', error);
-          alert('카테고리 추가에 실패했습니다.');
-        }
+        console.error('카테고리 추가 실패:', error);
+        alert('카테고리 추가에 실패했습니다: ' + error.message);
         return;
       }
 
@@ -120,7 +135,7 @@ function App() {
       fetchBookmarks(); // 목록 새로고침
     } catch (error) {
       console.error('카테고리 추가 실패:', error);
-      alert('네트워크 오류가 발생했습니다.');
+      alert('네트워크 오류가 발생했습니다: ' + error.message);
     }
   };
 
@@ -137,24 +152,14 @@ function App() {
       return;
     }
 
+    // 중복 체크
+    if (getUniqueCategories().includes(editCategoryName.trim())) {
+      alert('이미 존재하는 카테고리입니다.');
+      return;
+    }
+
     try {
-      // categories 테이블에서 수정
-      const { error: categoryError } = await supabase
-        .from('categories')
-        .update({ name: editCategoryName.trim() })
-        .eq('name', oldCategory);
-
-      if (categoryError) {
-        if (categoryError.code === '23505') {
-          alert('이미 존재하는 카테고리입니다.');
-        } else {
-          console.error('카테고리 수정 실패:', categoryError);
-          alert('카테고리 수정에 실패했습니다.');
-        }
-        return;
-      }
-
-      // bookmarks 테이블에서도 업데이트
+      // bookmarks 테이블에서 해당 카테고리의 모든 항목 업데이트
       const { error: bookmarkError } = await supabase
         .from('bookmarks')
         .update({ category: editCategoryName.trim() })
@@ -162,6 +167,8 @@ function App() {
 
       if (bookmarkError) {
         console.error('북마크 카테고리 업데이트 실패:', bookmarkError);
+        alert('카테고리 수정에 실패했습니다.');
+        return;
       }
 
       alert('카테고리가 수정되었습니다.');
@@ -183,37 +190,25 @@ function App() {
         return;
       }
 
-      // 해당 카테고리의 모든 북마크 삭제
-      const { error: bookmarkError } = await supabase
-        .from('bookmarks')
-        .delete()
-        .eq('category', category);
+      try {
+        // 해당 카테고리의 모든 북마크 삭제
+        const { error } = await supabase
+          .from('bookmarks')
+          .delete()
+          .eq('category', category);
 
-      if (bookmarkError) {
-        console.error('북마크 삭제 실패:', bookmarkError);
-        alert('북마크 삭제에 실패했습니다.');
-        return;
-      }
-    }
+        if (error) {
+          console.error('북마크 삭제 실패:', error);
+          alert('북마크 삭제에 실패했습니다.');
+          return;
+        }
 
-    try {
-      // categories 테이블에서 삭제
-      const { error } = await supabase
-        .from('categories')
-        .delete()
-        .eq('name', category);
-
-      if (error) {
+        alert('카테고리가 삭제되었습니다.');
+        fetchBookmarks(); // 목록 새로고침
+      } catch (error) {
         console.error('카테고리 삭제 실패:', error);
-        alert('카테고리 삭제에 실패했습니다.');
-        return;
+        alert('네트워크 오류가 발생했습니다.');
       }
-
-      alert('카테고리가 삭제되었습니다.');
-      fetchBookmarks(); // 목록 새로고침
-    } catch (error) {
-      console.error('카테고리 삭제 실패:', error);
-      alert('네트워크 오류가 발생했습니다.');
     }
   };
 
@@ -544,20 +539,10 @@ function App() {
                             <select
                               value={editBookmarkData.category}
                               onChange={(e) => {
-                                if (e.target.value === '__new__') {
-                                  const newCategory = prompt('새 카테고리 이름을 입력하세요:');
-                                  if (newCategory && newCategory.trim()) {
-                                    setEditBookmarkData({
-                                      ...editBookmarkData,
-                                      category: newCategory.trim()
-                                    });
-                                  }
-                                } else {
-                                  setEditBookmarkData({
-                                    ...editBookmarkData,
-                                    category: e.target.value
-                                  });
-                                }
+                                setEditBookmarkData({
+                                  ...editBookmarkData,
+                                  category: e.target.value
+                                });
                               }}
                               className="edit-select"
                             >
@@ -567,16 +552,6 @@ function App() {
                                   {category}
                                 </option>
                               ))}
-                              {/* 새로 입력한 카테고리가 기존 목록에 없으면 임시로 추가 */}
-                              {editBookmarkData.category &&
-                               editBookmarkData.category !== '' &&
-                               !getUniqueCategories().includes(editBookmarkData.category) &&
-                               editBookmarkData.category !== '__new__' && (
-                                <option key={editBookmarkData.category} value={editBookmarkData.category}>
-                                  {editBookmarkData.category} (새 카테고리)
-                                </option>
-                              )}
-                              <option value="__new__">+ 새 카테고리 추가</option>
                             </select>
                           </td>
                           <td>
@@ -712,29 +687,7 @@ function App() {
                   id="category"
                   name="category"
                   value={formData.category}
-                  onChange={(e) => {
-                    console.log('카테고리 선택:', e.target.value);
-                    if (e.target.value === '__new__') {
-                      console.log('새 카테고리 추가 선택됨');
-                      const newCategory = prompt('새 카테고리 이름을 입력하세요:');
-                      console.log('입력된 카테고리:', newCategory);
-                      if (newCategory && newCategory.trim()) {
-                        setFormData({
-                          ...formData,
-                          category: newCategory.trim()
-                        });
-                      } else {
-                        // 취소했을 경우 첫 번째 카테고리로 되돌리기
-                        const firstCategory = getUniqueCategories()[0] || '';
-                        setFormData({
-                          ...formData,
-                          category: firstCategory
-                        });
-                      }
-                    } else {
-                      handleInputChange(e);
-                    }
-                  }}
+                  onChange={handleInputChange}
                 >
                   <option value="">카테고리 선택</option>
                   {getUniqueCategories().map(category => (
@@ -742,16 +695,6 @@ function App() {
                       {category}
                     </option>
                   ))}
-                  {/* 새로 입력한 카테고리가 기존 목록에 없으면 임시로 추가 */}
-                  {formData.category &&
-                   formData.category !== '' &&
-                   !getUniqueCategories().includes(formData.category) &&
-                   formData.category !== '__new__' && (
-                    <option key={formData.category} value={formData.category}>
-                      {formData.category} (새 카테고리)
-                    </option>
-                  )}
-                  <option value="__new__">+ 새 카테고리 추가</option>
                 </select>
               </div>
 

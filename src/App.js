@@ -317,23 +317,14 @@ function App() {
     }
 
     try {
-      // 새 북마크는 항상 맨 위(order: 0)에 추가
-      // 먼저 기존 북마크들의 order를 1씩 증가
-      if (bookmarks.length > 0) {
-        // 각 북마크의 order를 개별적으로 업데이트
-        for (const bookmark of bookmarks) {
-          await supabase
-            .from('bookmarks')
-            .update({ order: (bookmark.order || 0) + 1 })
-            .eq('id', bookmark.id);
-        }
-      }
+      // 현재 최대 order 값을 찾아서 +1 (맨 위에 추가하려면 음수 사용)
+      const maxOrder = bookmarks.length > 0 ? Math.max(...bookmarks.map(b => b.order || 0)) : 0;
 
       const bookmarkData = {
         url: formData.url,
         description: formData.description,
         category: formData.category,
-        order: 0  // 항상 맨 위
+        order: -(Date.now())  // 음수 타임스탬프로 항상 맨 위 보장
       };
 
       const { error } = await supabase

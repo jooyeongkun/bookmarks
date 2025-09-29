@@ -347,7 +347,7 @@ function App() {
         return;
       }
 
-      alert('북마크가 추가되었습니다!');
+      // 성공 시 바로 폼 초기화하고 모달 닫기 (알림 팝업 없음)
       setFormData({ category: '', url: '', description: '' });
       setShowModal(false);
       fetchBookmarks(); // 목록 새로고침
